@@ -3,6 +3,8 @@ import os
 import time
 from dataclasses import dataclass
 from typing import Optional
+import tritonclient.grpc.aio as grpcclient
+from tritonclient.utils import InferenceServerException
 
 import aiohttp
 from tqdm.asyncio import tqdm
@@ -344,6 +346,64 @@ async def async_request_openai_chat_completions(
         pbar.update(1)
     return output
 
+async def async_request_ovms_kserve(
+    request_func_input: RequestFuncInput,
+    pbar: Optional[tqdm] = None,
+) -> RequestFuncOutput:
+    channel_args = [
+        # Do not drop the connection for long workloads
+        ("grpc.http2.max_pings_without_data", 0),
+    ]
+
+    async def async_stream_yield(prompts):
+        for prompt in prompts:
+            inputs = []
+            inputs.append(grpcclient.InferInput("pre_prompt", [1], "BYTES"))
+            inputs[0]._raw_content = prompt.encode()
+            outputs = []
+            #outputs.append(grpcclient.InferRequestedOutput("completion"))
+            yield {
+                "model_name": "python_model",
+                "inputs": inputs,
+            #    "outputs": outputs,
+            }
+
+    async with grpcclient.InferenceServerClient(
+        url=request_func_input.api_url, verbose=False,  channel_args=channel_args
+    ) as triton_client:
+        output = RequestFuncOutput()
+        output.prompt_len = request_func_input.prompt_len
+        generated_text = ""
+        ttft = 0
+        st = time.perf_counter()
+        try:
+            response_iterator = triton_client.stream_infer(
+                inputs_iterator=async_stream_yield([request_func_input.prompt])
+            )
+            async for response in response_iterator:
+                if response is not None and response[0].as_numpy('end_signal') is None and response[0].as_numpy('token_count') is None:
+                    chunk = response[0].as_numpy('completion').tobytes().decode()
+                    if ttft == 0:
+                        ttft = time.perf_counter() - st
+                        output.ttft = ttft
+                    chunk = chunk.strip()
+                    if not chunk:
+                        continue
+                    generated_text += chunk
+                else:
+                    latency = time.perf_counter() - st
+                            
+            output.generated_text = generated_text
+            output.success = True
+            output.latency = latency
+
+        except InferenceServerException as error:
+            print(error)
+            output.success = False
+
+    if pbar:
+        pbar.update(1)
+    return output
 
 # Since vllm must support Python 3.8, we can't use str.removeprefix(prefix)
 # introduced in Python 3.9
@@ -360,4 +420,5 @@ ASYNC_REQUEST_FUNCS = {
     "openai": async_request_openai_completions,
     "openai-chat": async_request_openai_chat_completions,
     "tensorrt-llm": async_request_trt_llm,
+    "ovms-kserve": async_request_ovms_kserve,
 }
