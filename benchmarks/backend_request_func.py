@@ -236,7 +236,6 @@ async def async_request_openai_completions(
             "temperature": 0.0,
             "best_of": request_func_input.best_of,
             "max_tokens": request_func_input.output_len,
-            "ignore_eos": True,
             "stream": True,
         }
         headers = {
@@ -323,7 +322,6 @@ async def async_request_openai_chat_completions(
             ],
             "temperature": 0.0,
             "max_tokens": request_func_input.output_len,
-            "ignore_eos": True,
             "stream": True,
         }
         headers = {
