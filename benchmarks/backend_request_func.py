@@ -264,23 +264,26 @@ async def async_request_openai_completions(
                             latency = time.perf_counter() - st
                         else:
                             data = json.loads(chunk)
-
-                            # NOTE: Some completion API might have a last
-                            # usage summary response without a token so we
-                            # want to check a token was generated
-                            if data["choices"][0]["text"]:
-                                timestamp = time.perf_counter()
-                                # First token
-                                if ttft == 0.0:
-                                    ttft = time.perf_counter() - st
-                                    output.ttft = ttft
+                            if "text" in data["choices"][0]:
+                                if data["choices"][0]["text"]:
+                                    timestamp = time.perf_counter()
+                                    # First token
+                                    if ttft == 0.0:
+                                        ttft = time.perf_counter() - st
+                                        output.ttft = ttft
 
                                 # Decoding phase
-                                output.itl.append(timestamp -
-                                                  most_recent_timestamp)
+                                # NOTE: Some completion API might have a last
+                                # usage summary response without a token so we
+                                # do not want to include as inter-token-latency
+                                    elif data.get("usage", None) is None:
+                                        output.itl.append(timestamp -
+                                                          most_recent_timestamp)
 
-                                most_recent_timestamp = timestamp
-                                generated_text += data["choices"][0]["text"]
+                                    most_recent_timestamp = timestamp
+                                    generated_text += data["choices"][0]["text"]
+                            else:
+                                latency = time.perf_counter() - st
 
                     output.generated_text = generated_text
                     output.success = True
@@ -319,6 +322,7 @@ async def async_request_openai_chat_completions(
             ],
             "temperature": 0.0,
             "max_tokens": request_func_input.output_len,
+            "ignore_eos": True,
             "stream": True,
         }
         headers = {

@@ -503,6 +503,7 @@ def main(args: argparse.Namespace):
 
         # Merge with benchmark result
         result_json = {**result_json, **benchmark_result}
+        result_json["inputs"] = input_requests
 
         # Save to file
         base_model_id = model_id.split("/")[-1]
